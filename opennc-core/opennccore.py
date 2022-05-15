@@ -10,6 +10,9 @@ import subprocess
 import ipaddress
 import OpenSSL
 import openncapi
+import sqlite3
+import random
+import string
 
 # Global variables
 version = "0.1.2"
@@ -19,6 +22,8 @@ sessions = []
 auth_time = None
 conn = None
 logger = None
+dbreq = []
+dbresp = []
 
 # Class for sheduled tasks storaging
 class Task:
@@ -26,6 +31,38 @@ class Task:
         self.period = period
         self.task = task
         self.lastrun = time.time()
+
+
+# class for working with db
+class DBBrocker(threading.Thread):
+    def run(self):
+        path_to_db = config.get("database", "/etc/opennc/opennc.db")
+        self.conn = sqlite3.connect()
+        self.cursor = self.conn.cursor()
+        while True:
+            self.processQueues()
+            time.sleep(0.3)
+
+    def processQueues(self):
+        for i in dbreq:            
+            if i[1].split(" ")[0].lower == "select":
+                self.cursor.execute(i[1])
+                dbresp.append([i[0], self.cursor.fetchall()])
+                dbreq.remove(i)
+            elif i[1].split(" ")[0].lower == "insert":
+                self.cursor.execute(i[1])
+                self.conn.commit()
+                dbreq.remove(i)
+            elif i[1].split(" ")[0].lower == "update":
+                self.cursor.execute(i[1])
+                self.conn.commit()
+                dbreq.remove(i)
+            elif i[1].split(" ")[0].lower == "delete":
+                self.cursor.execute(i[1])
+                self.conn.commit()
+                dbreq.remove(i)
+            else:
+                logger.warning("Failed to execute unrecognized request to DB: %s" % i[1])
 
 
 # Collecting statistic
@@ -142,6 +179,21 @@ def user_auth(login, passwd):
     return False
 
 
+# Create request to database to queue
+def addReq(request):
+    reqestid = ""
+    for i in range(5):
+        reqestid += random.choice(string.ascii_lowercase + "01234567890" + "!@#$%^&*()_-=+")
+    dbreq.append([reqestid, request])
+    for t in range(0, 3):
+        time.sleep(0.5)
+        for i in dbresp:
+            if i[0] == reqestid:
+                dbresp.remove(i)
+                return i[1]
+    return None
+
+
 if __name__ == "__main__":
     # Return help and exit
     if "-h" in sys.argv or "--help" in sys.argv:
@@ -190,6 +242,10 @@ if __name__ == "__main__":
     sheduling = Sheduling()
     sheduling.start()
     logger.info("Shedule is running")
+
+    # Init database brocker
+    dbbrocker = DBBrocker()
+    dbbrocker.start()
     
     # Init api    
     # Find avaluable subnets for control
@@ -238,7 +294,7 @@ if __name__ == "__main__":
     # Creating API workers
     for i in range(int(config.get("api_workers", "1")) - 1):
         api = openncapi.Api()
-        api.configure(config.get("api_host", "127.0.0.1"), int(config.get("api_port", "43581")), permit_ip, context)
+        api.configure(config.get("api_host", "0.0.0.0"), int(config.get("api_port", "43581")), permit_ip, context)
         api.start()
     logger.info("Api is running")
 

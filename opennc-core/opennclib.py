@@ -10,7 +10,7 @@ class Interfaces:
     def getInt(self):
         ints = subprocess.run(["ip", "--json", "a"], capture_output=True)
         if ints.returncode == 0:
-            return json.loads(ints.stdout.hashline.stdout.decode("UTF-8"))
+            return json.loads(ints.stdout.decode("UTF-8"))
         else:
             return None
 
@@ -125,6 +125,42 @@ class Interfaces:
 class Firewall:
     def __init__(self):
         pass
+
+    def addRule(self, chain, action, dstInt, srcInt=None, src=None, dst=None, proto=None, params=None):
+        command = ["iptables", "-A", chain]
+        if srcInt:
+            command.append("-i")
+            command.append(srcInt)
+        if dstInt:
+            command.append("-o")
+            command.append(dstInt)
+        if src:
+            command.append("-s")
+            command.append(src)
+        if dst:
+            command.append("-d")
+            command.append(dst)
+        if proto:
+            command.append("-p")
+            command.append(proto)
+        command.append("-j")
+        command.append(action)
+        if params:
+            command.append(params)
+        subprocess.run(command, capture_output=True)
+            
+    
+    def flushRules(self):
+        subprocess.run(["iptables", "-F"], capture_output=True)
+        subprocess.run(["iptables", "-t", "nat", "-F"], capture_output=True)
+        subprocess.run(["iptables", "-t", "mangle", "-F"], capture_output=True)
+    
+    def setNat(self, dstInt):
+        natip = "0.0.0.0"
+        for i in Interfaces().getInt():
+            if i["ifname"] == dstInt:
+                natip = i["addr_info"][0]["local"]
+        subprocess.run(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", dstInt, "-j", "SNAT", "--to-source", natip], capture_output=True)
 
 
 # Class for configurating routes
