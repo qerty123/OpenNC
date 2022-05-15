@@ -6,6 +6,8 @@ import sys
 import subprocess
 import configparser
 import time
+import random
+import string
 from os import environ
 
 
@@ -72,33 +74,32 @@ class Config:
 
 
 def exec(com):
-    if com == "help" or com == "?":
+    com = com.split(" ")
+    if com[0] == "help" or com[0] == "?":
         print("Help text") #TODO: write help
-        return
-    if com == "logout":
+    elif com[0] == "logout":
             exit(0)
-    if com == "exit" or com == "quit":
+    elif com[0] == "exit" or com[0] == "quit":
         if enabled:
             enabled = False
         else:
             requests.post("%s/api/logout" % reqaddr, json={"session_id": session_id}, cookies={"session_id": session_id})
-        return
-    if com == "en" or com == "enable":
+    elif com[0] == "en" or com[0] == "enable":
         pas = input("Password: ")
         responce = requests.post("%s/api/enable" % reqaddr, json={"password": pas})
         if responce.status_code == 200:
             enabled = True
         else:
             print("Wrong password. This incident will be logged")
-        return
-    com = com.split(" ")
-    if com[0] == "show":
+    elif com[0] == "show":
         pass
-    if not enabled:
+    elif not enabled:
         print("Unrecognized command")
         return
-    if com[0] == "config":
+    elif com[0] == "config":
         pass
+    else:
+        print("Unrecognized command")
 
 
 def resque():
@@ -142,6 +143,10 @@ else:
         print("Node in the warning status")
     try:
         localkey = ""
+        for i in range(50):
+            localkey += random.choice(string.ascii_lowercase + "01234567890" + "!@#$%^&*()_-=+")
+        with open("/tmp/opennckey", "w") as f:
+            f.write(localkey)
         responce = requests.post("%s/api/login" % reqaddr, json={"username": user, "password": "localkey:%s" % localkey, "ip": "127.0.0.1"})
         if responce.status_code != 200:
             resque()

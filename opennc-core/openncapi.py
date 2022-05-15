@@ -82,7 +82,22 @@ class Api(threading.Thread):
             username = content["username"]
             password = content["password"]
             ip = content["ip"]
-            if user_auth(username, password):
+            if ip == "127.0.0.1" and password.split(":")[0] == "localkey":
+                with open("/tmp/opennckey", "r") as f:
+                    key = f.read()
+                if key == password.split(":")[1]:
+                    logger.info("Succesfull authorization for user %s" % username)
+                    if username == "root":
+                        enabled = True
+                    else:
+                        enabled = False
+                    session_id = ""
+                    for i in range(50):
+                        session_id += random.choice(string.ascii_lowercase + "01234567890" + "!@#$%^&*()_-=+")
+                    expires = time.time() + auth_time
+                    sessions.append(Session(session_id, ip, username, expires, enabled))
+                    return flask.make_response(flask.jsonify(status="ok", session_id=session_id, expires=expires, enabled=enabled))   
+            elif user_auth(username, password):
                 logger.info("Succesfull authorization for user %s" % username)
                 if username == "root":
                     enabled = True
@@ -93,11 +108,9 @@ class Api(threading.Thread):
                     session_id += random.choice(string.ascii_lowercase + "01234567890" + "!@#$%^&*()_-=+")
                 expires = time.time() + auth_time
                 sessions.append(Session(session_id, ip, username, expires, enabled))
-                res = flask.make_response(flask.jsonify(status="ok", session_id=session_id, expires=expires, enabled=enabled))
-            else:
-                logger.info("Authorization failed for user %s" % username)
-                res = flask.make_response(flask.jsonify(status="error"), 401)
-            return res
+                return flask.make_response(flask.jsonify(status="ok", session_id=session_id, expires=expires, enabled=enabled))            
+            logger.info("Authorization failed for user %s" % username)
+            return flask.make_response(flask.jsonify(status="error"), 401)
         
         @self.app.route("/api/logout", methods=["POST"])
         @self.check_permit_ip
@@ -143,5 +156,37 @@ class Api(threading.Thread):
                 res = flask.make_response(flask.jsonify(status="error"), 401)
             return res
             
+        @self.app.route("/api/getint", methods=["GET"])
+        @self.check_permit_ip
+        @self.check_auth
+        def getInt():
+            ints = Interfaces.getInt()
+            if ints:
+                res = flask.make_response(flask.jsonify(status="ok", interfaces=ints), 200)
+            else:
+                res = flask.make_response(flask.jsonify(status="error"), 500)
+                logger.warning("Couldnt get list of interfaces")
+            return res
+
+        @self.app.route("/api/confint", methods=["POST"])
+        @self.check_permit_ip
+        @self.check_auth
+        def confInt():
+            pass
+
+        @self.app.route("/api/rmint", methods=["POST"])
+        @self.check_permit_ip
+        @self.check_auth
+        def rmInt():
+            pass
+
+        @self.app.route("/api/createint", methods=["POST"])
+        @self.check_permit_ip
+        @self.check_auth
+        def createInt():
+            pass
+
+
+
 
     

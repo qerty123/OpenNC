@@ -14,7 +14,7 @@ class Interfaces:
         else:
             return None
 
-    def setInt(self, type, ifname, ip, netmask, gateway, vlanint, bridgeports):
+    def confInt(self, type, ifname, ip, netmask, gateway, vlanint, bridgeports):
         with open("/etc/network/interfaces") as f:
             lines = f.readlines()
         if type == "dhcp":
