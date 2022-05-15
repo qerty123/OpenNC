@@ -74,9 +74,29 @@ class Config:
 def exec(com):
     if com == "help" or com == "?":
         print("Help text") #TODO: write help
+        return
+    if com == "logout":
+            exit(0)
+    if com == "exit" or com == "quit":
+        if enabled:
+            enabled = False
+        else:
+            requests.post("%s/api/logout" % reqaddr, json={"session_id": session_id}, cookies={"session_id": session_id})
+        return
+    if com == "en" or com == "enable":
+        pas = input("Password: ")
+        responce = requests.post("%s/api/enable" % reqaddr, json={"password": pas})
+        if responce.status_code == 200:
+            enabled = True
+        else:
+            print("Wrong password. This incident will be logged")
+        return
     com = com.split(" ")
     if com[0] == "show":
         pass
+    if not enabled:
+        print("Unrecognized command")
+        return
     if com[0] == "config":
         pass
 
@@ -107,6 +127,8 @@ if config.get("privatekey", None) and config.get("certificate", None):
     proto = "https"
 else:
     proto = "http"
+reqaddr = "%s://%s:%s" % (proto, host, port)
+
 
 print("Welcome to local node with OpenNC")
 try:
@@ -120,7 +142,7 @@ else:
         print("Node in the warning status")
     try:
         localkey = ""
-        responce = requests.post("%s://%s:%s/api/login" % (proto, host, port), json={"username": user, "password": "localkey:%s" % localkey, "ip": "127.0.0.1"})
+        responce = requests.post("%s/api/login" % reqaddr, json={"username": user, "password": "localkey:%s" % localkey, "ip": "127.0.0.1"})
         if responce.status_code != 200:
             resque()
         else:
@@ -136,21 +158,10 @@ while True:
             com = input("# ")
         else:
             com = input("$ ")
-        if com == "logout":
-            exit(0)
-        if com == "exit" or com == "quit":
-            if enabled:
-                enabled = False
-            else:
-                try:
-                    requests.post("%s://%s:%s/api/login" % (proto, host, port), json={"session_id": session_id}, cookies={"session_id": session_id})
-                except Exception as e:
-                    pass
+        if expires > time.time():
+            exec(com)
         else:
-            if expires > time.time():
-                exec(com)
-            else:
-                break
+            break
     except KeyboardInterrupt:
         print("")
 print("Goodbuy!")

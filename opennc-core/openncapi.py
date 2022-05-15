@@ -123,6 +123,25 @@ class Api(threading.Thread):
         @self.check_auth
         def root():
             flask.make_response("400 Bad Request", 400) 
+        
+        @self.app.route("/api/enable", methods=["POST"])
+        @self.check_permit_ip
+        @self.check_auth
+        def enable():
+            content = flask.request.json
+            password = content["password"]
+            session_id = flask.request.cookies.get("session_id")
+            for i in sessions:
+                if i.session_id == session_id:
+                    session = i                    
+            if user_auth("root", password):
+                session.enabled = True
+                logger.info("User %s enter to the priveledged mode" % session.login)
+                res = flask.make_response(flask.jsonify(status="ok"), 200)
+            else:
+                logger.info("Failed to use priveledged mode for user " % session.login)
+                res = flask.make_response(flask.jsonify(status="error"), 401)
+            return res
             
 
     

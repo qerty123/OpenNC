@@ -12,7 +12,7 @@ import OpenSSL
 import openncapi
 
 # Global variables
-version = "0.1.0"
+version = "0.1.1"
 shedule = []
 stat = None
 sessions = []
