@@ -127,3 +127,14 @@ dmypy.json
 
 # Pyre type checker
 .pyre/
+
+# Custom rules
+opennc-web/
+test.py
+setup.sh
+cert.crt
+key.key
+opennc-core.conf
+
+
+
