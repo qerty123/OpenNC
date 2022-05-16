@@ -126,7 +126,7 @@ class Firewall:
     def __init__(self):
         pass
 
-    def addRule(self, chain, action, dstInt, srcInt=None, src=None, dst=None, proto=None, params=None):
+    def addRule(self, chain, action, srcInt=None, dstInt=None, src=None, dst=None, proto=None, params=None):
         command = ["iptables", "-A", chain]
         if srcInt:
             command.append("-i")
@@ -161,6 +161,11 @@ class Firewall:
             if i["ifname"] == dstInt:
                 natip = i["addr_info"][0]["local"]
         subprocess.run(["iptables", "-t", "nat", "-A", "POSTROUTING", "-o", dstInt, "-j", "SNAT", "--to-source", natip], capture_output=True)
+    
+    def enableSquid(self, srcInt, toports):
+        # iptables -A PREROUTING -d! 192.168.0.0/24 -i eth0 -p tcp -m multiport --dports 80,443 -j REDIRECT --to-ports 3128
+        command = ["iptables", "-A", "PREROUTING", "-i", srcInt, "-p", "tcp", "-m", "multiport" "--dports", "80,443", "-j", "REDIRECT", "--to-ports", toports]
+        subprocess.run(command, capture_output=True)
 
 
 # Class for configurating routes
@@ -204,6 +209,11 @@ class VPN:
     def __init__(self):
         pass
 
+
+# Class for configurating DHCP server
+class DHCP:
+    def __init__(self):
+        pass
 
 
 
