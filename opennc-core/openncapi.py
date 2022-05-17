@@ -7,7 +7,7 @@ import time
 import string
 
 from logging import DEBUG
-from opennccore import user_auth, logger, sessions, auth_time, version, Session
+from opennccore import user_auth, logger, sessions, auth_time, version, Session, shedule, Task, reboot, shutdown
 from opennclib import Firewall, Interfaces, Routes
 
 
@@ -67,10 +67,10 @@ class Api(threading.Thread):
         @self.check_permit_ip      
         def check():
             try:
-                date = subprocess.run(["date"], capture_output=True).stdout
-                hostname = subprocess.run(["hostname"], capture_output=True).stdout
-                uptime = subprocess.run(["uptime"], capture_output=True).stdout.split(" ")[1]
-                osinfo = subprocess.run(["uname", "-a"], capture_output=True).stdout
+                date = subprocess.run(["date"], capture_output=True).stdout.decode("UTF-8")
+                hostname = subprocess.run(["hostname"], capture_output=True).stdout.decode("UTF-8")
+                uptime = subprocess.run(["uptime"], capture_output=True).stdout.decode("UTF-8").split(" ")[1]
+                osinfo = subprocess.run(["uname", "-a"], capture_output=True).stdout.decode("UTF-8")
                 return flask.make_response(flask.jsonify(status="ok", date=date, uptine=uptime, hostname=hostname, version=version, os=osinfo))
             except Exception as e:
                 return flask.make_response(flask.jsonify(status="warning"))
@@ -185,6 +185,59 @@ class Api(threading.Thread):
         @self.check_auth
         def createInt():
             pass
+
+        @self.app.route("/api/getcpu", methods=["GET"])  
+        @self.check_permit_ip     
+        @self.check_auth 
+        def getcpu():
+            try:
+                lscpu = subprocess.run(["lscpu"], capture_output=True).stdout.decode("UTF-8")
+                for i in lscpu:
+                    if "Architecture" in i:
+                        arch = i.split()[1]
+                    if "CPU(s)" in i:
+                        cores = i.split()[1]
+                    if "Model name" in i:
+                        model = i.split()[1:]
+                    if "CPU max MHz" in i:
+                        freq = i.split()[1]
+                la = subprocess.run(["uptime"], capture_output=True).stdout.decode("UTF-8").split()[7]
+                return flask.make_response(flask.jsonify(status="ok", arch=arch, cores=cores, model=model, freq=freq, la=la))
+            except Exception as e:
+                return flask.make_response(flask.jsonify(status="warning"))
+
+        @self.app.route("/api/getmemory", methods=["GET"])  
+        @self.check_permit_ip     
+        @self.check_auth 
+        def getmemory():
+            try:
+                # total_mem, alail_mem, total_swap, free_swap
+                free = subprocess.run(["free"], capture_output=True).stdout.decode("UTF-8").split()
+                total_mem = free[7]
+                free_mem = free[12]
+                total_swap = free[14]
+                free_swap = free[16]
+                return flask.make_response(flask.jsonify(status="ok", total_mem=total_mem, free_mem=free_mem, total_swap=total_swap, free_swap=free_swap))
+            except Exception as e:
+                return flask.make_response(flask.jsonify(status="warning"))
+
+        @self.app.route("/api/reboot", methods=["POST"])  
+        @self.check_permit_ip     
+        @self.check_auth 
+        def reboot():
+            content = flask.request.json
+            time = int(content["time"]) * 60
+            shedule.append(Task(time, reboot))
+            return flask.make_response(flask.jsonify(status="ok"))
+
+        @self.app.route("/api/shutdown", methods=["POST"])  
+        @self.check_permit_ip     
+        @self.check_auth 
+        def reboot():
+            content = flask.request.json
+            time = int(content["time"]) * 60
+            shedule.append(Task(time, shutdown))
+            return flask.make_response(flask.jsonify(status="ok"))
 
 
 

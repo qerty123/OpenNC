@@ -15,7 +15,7 @@ import opennclib
 import requests
 
 # Global variables
-version = "0.1.2"
+version = "0.2.0"
 shedule = []
 stat = None
 sessions = []
@@ -149,6 +149,13 @@ def user_auth(login, passwd):
     return False
 
 
+def reboot():
+    subprocess.run(["reboot"], capture_output=True)
+
+def shutdown():
+    subprocess.run(["reboot", "--poweroff"], capture_output=True)
+
+
 # Create request to database to queue
 def getDBData(path_to_db):
     conn = sqlite3.connect(path_to_db)
@@ -223,10 +230,13 @@ if __name__ == "__main__":
     sheduling.start()
     logger.info("Shedule is running")
 
-    # Get settings from DB
+    # Set forwarding
+    subprocess.run(["sysctl", "-w", "net.ipv4.ip_forward=1"], capture_output=True)
+
+    # Init params list from database
     getDBData(config.get("database", "/etc/opennc/opennc.db"))
 
-    # Set firewall rules
+    # Set options from DB
     firewall = opennclib.Firewall()
     firewall.flushRules()
     for i in params:
@@ -246,8 +256,10 @@ if __name__ == "__main__":
                 if t[1] == "squidToPorts":
                     toports = t[2]
             firewall.enableSquid(srcInt, toports)
+        elif i[1] == "tun2socks":
+            pass
 
-
+    # Set firewall rules
     # id INT PRIMARY KEY, type TEXT, queueid INT, src TEXT, dst TEXT, proto TEXT, port INT, action INT, rule TEXT
     for i in rules:
         if i[1] == "default":
@@ -309,7 +321,8 @@ if __name__ == "__main__":
                 for ds in dst:
                     firewall.addRule("FORWARD", i[7], srcInt, None, sr, ds, i[5])           
         elif i[1] == "text":
-            subprocess.run([i[7]], capture_output=True)
+            command = i[7].split(" ")
+            subprocess.run(command, capture_output=True)
         else:
             logger.warning("Failed to set firewall rule: %s" % i)
     

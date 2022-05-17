@@ -14,18 +14,42 @@ from os import environ
 class OpenNCCLICompleter(object):
     def __init__(self, options):
         self.options = options
+        self.current_candidates = []
+        return
 
     def complete(self, text, state):
+        response = None
         if state == 0:
-            if not text:
-                self.matches = self.options[:]
+            origline = readline.get_line_buffer()
+            begin = readline.get_begidx()
+            end = readline.get_endidx()
+            being_completed = origline[begin:end]
+            words = origline.split()
+
+            if not words:
+                self.current_candidates = sorted(self.options.keys())
             else:
-                self.matches = [s for s in self.options
-                                if s and s.startswith(text)]
+                try:
+                    if begin == 0:
+                        candidates = self.options.keys()
+                    else:
+                        first = words[0]
+                        candidates = self.options[first]
+                    
+                    if being_completed:
+                        self.current_candidates = [ w for w in candidates
+                                                    if w.startswith(being_completed) ]
+                    else:
+                        self.current_candidates = candidates
+                except IndexError as err:
+                    self.current_candidates = []
+                except KeyError as err:
+                    self.current_candidates = []                                
         try:
-            return self.matches[state]
+            response = self.current_candidates[state]
         except IndexError:
-            return None
+            response = None
+        return response
 
     """
     def display_matches(self, substitution, matches, longest_match_length):
@@ -75,10 +99,12 @@ class Config:
 
 def exec(com):
     com = com.split(" ")
-    if com[0] == "help" or com[0] == "?":
-        print("Help text") #TODO: write help
+    if com[0] == "":
+        return
+    elif com[0] == "help" or com[0] == "?":
+        print("") #TODO: write help
     elif com[0] == "logout":
-            exit(0)
+        exit(0)
     elif com[0] == "exit" or com[0] == "quit":
         if enabled:
             enabled = False
@@ -91,12 +117,82 @@ def exec(com):
             enabled = True
         else:
             print("Wrong password. This incident will be logged")
+    elif com[0] == "ssh":
+        subprocess.run(com)
+    elif com[0] == "resque":
+        subprocess.run(["/bin/bash"])
     elif com[0] == "show":
-        pass
+        if len(com) == 1:
+            print("Unrecognized command")             
+        elif com[1] == "version":
+            responce = requests.get("%s/api/check" % reqaddr, cookies={"session_id": session_id})
+            if responce.status_code == 200 and responce.json()["status"] == "ok":
+                print(responce.json()["hostname"])
+                print("OS version: " + responce.json()["os"])
+                print("OpenNC controller version: " + responce.json()["version"])
+                print("Node uptime: " + responce.json()["uptime"])
+                print("Local time: " + responce.json()["date"])
+            else:
+                print("Node in the warning status")
+        elif com[1] == "ports" or com[1] == "int" or com[1] == "port" or com[1] == "interface":
+            if len(com) == 2:
+                responce = requests.get("%s/api/getint" % reqaddr, cookies={"session_id": session_id})
+                if responce.status_code == 200 and responce.json()["status"] == "ok":
+                    print("   Interface   Status          MAC           Address")
+                    for i in responce.json()["interfaces"]:
+                        text = '{0: <15}'.format(i["ifname"])
+                        text += '{0: <6}'.format(i["operstate"])
+                        text += '{0: <22}'.format(i["address"])
+                        if len(i["addr_info"]) != 0:
+                            text += i["addr_info"][0]["local"] + "/" + i["addr_info"][0]["prefixlen"]
+                        print(text)
+            else:
+                responce = requests.get("%s/api/getint" % reqaddr, cookies={"session_id": session_id})
+                if responce.status_code == 200 and responce.json()["status"] == "ok":                    
+                    for i in responce.json()["interfaces"]:
+                        if i["ifname"] == com[3].lower():
+                            print("   Interface   Status          MAC           Address")
+                            text = '{0: <15}'.format(i["ifname"])
+                            text += '{0: <6}'.format(i["operstate"])
+                            text += '{0: <22}'.format(i["address"])
+                            if len(i["addr_info"]) != 0:
+                                text += i["addr_info"][0]["local"] + "/" + i["addr_info"][0]["prefixlen"]
+                            print(text)
+                            return
+                    print("No such interface")
+        elif com[1] == "cpu":
+            responce = requests.get("%s/api/getcpu" % reqaddr, cookies={"session_id": session_id})
+            if responce.status_code == 200 and responce.json()["status"] == "ok":
+                print(responce.json()["model"])
+                print(responce.json()["arch"] + "(%sx%s cores)" % (responce.json()["cores"], responce.json()["freq"]))
+                persus = int(responce.json()["la"]) / int(responce.json()["cores"]) * 100
+                print("Current load: " + responce.json()["la"] + "(%s%)" % persus)
+            else:
+                print("Node in the warning status")
+        elif com[1] == "mem" or com[1] == "memory":
+            responce = requests.get("%s/api/getmemory" % reqaddr, cookies={"session_id": session_id})
+            if responce.status_code == 200 and responce.json()["status"] == "ok":
+                print("Memory usage: " + (int(responce.json()["total_mem"]) - int(responce.json()["free_mem"])) + "/" + responce.json()["total_mem"])
+                print("Swap usage: " + (int(responce.json()["total_swap"]) - int(responce.json()["free_swap"])) + "/" + responce.json()["total_swap"])
+            else:
+                print("Node in the warning status")
+        else:
+            print("Unrecognized command")
     elif not enabled:
-        print("Unrecognized command")
-        return
-    elif com[0] == "config":
+        print("Unrecognized command")        
+    elif com[0] == "reload":
+        if len(com) != 3:
+            print("When to reboot server?")
+        else:
+            responce = requests.post("%s/api/reboot" % reqaddr, json={"time": com[3]}, cookies={"session_id": session_id})
+    elif com[0] == "shutdown":
+        if len(com) != 3:
+            print("When to shutdown server?")
+        else:
+            responce = requests.post("%s/api/shutdown" % reqaddr, json={"time": com[3]}, cookies={"session_id": session_id})
+    elif com[0] == "config" or com[0] == "conf":
+        pass
+    elif com[0] == "delete" or com[0] == "del":
         pass
     else:
         print("Unrecognized command")
@@ -113,9 +209,15 @@ def resque():
 
 enabled = False
 config = Config()
-completer = OpenNCCLICompleter([])
+# TODO: change autocomlete
+completer = OpenNCCLICompleter({"enable": [], "exit": [], "logout": [], "ssh": [], "resque": [], \
+    "reload": ["in"], "shutdown": ["in"], \
+    "show": ["version", "interface", "ports", "cpu", "memory"], \
+    "config": ["interface", "ip"] \
+    })
 session_id = ""
 expires = 0
+prefix = subprocess.run(["hostname"], capture_output=True).stdout.decode("UTF-8")
 user = subprocess.run(["id", "-u", "-n"], capture_output=True).stdout.decode("UTF-8")
 readline.set_completer(completer.complete)
 readline.parse_and_bind('tab: complete')
@@ -160,11 +262,14 @@ else:
 while True:
     try:
         if enabled:
-            com = input("# ")
+            com = input(prefix + "# ")
         else:
-            com = input("$ ")
+            com = input(prefix + "$ ")
         if expires > time.time():
-            exec(com)
+            try:
+                exec(com.lower())
+            except Exception as e:
+                print("Error: " + e)
         else:
             break
     except KeyboardInterrupt:
