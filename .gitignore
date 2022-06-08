@@ -130,7 +130,7 @@ dmypy.json
 
 # Custom rules
 opennc-web/
-test.py
+test.*
 setup.sh
 cert.crt
 key.key
