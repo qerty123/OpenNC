@@ -1,5 +1,6 @@
 #!/usr/bin/python3
 
+
 import sqlite3
 import requests
 import configparser
@@ -9,13 +10,15 @@ import os
 import time
 import json
 import socket
+import socket
+import secrets
 
-from dnslib import DNSLabel, QTYPE, RR, dns
+from dnslib import DNSLabel, QTYPE, RR, dns, DNSRecord
 from dnslib.proxy import ProxyResolver
 from dnslib.server import DNSServer
 
 
-version = "0.1.0"
+version = "0.2.0"
 records = []
 cache = []
 zones = {}
@@ -39,10 +42,28 @@ TYPE_LOOKUP = {
 }
 
 
+QTYPE_LOOKUP = {
+    1: ("A", dns.A),
+    28: ("AAAA", dns.AAAA),
+    257: ("CAA", dns.CAA),
+    5: ("CNAME", dns.CNAME),
+    48: ("DNSKEY", dns.DNSKEY),
+    15: ("MX", dns.MX),
+    35: ("NAPTR", dns.NAPTR),
+    2: ("NS", dns.NS),
+    12: ("PTR", dns.PTR),
+    46: ("RRSIG", dns.RRSIG),
+    6: ("SOA", dns.SOA),
+    33: ("SRV", dns.SRV),
+    16: ("TXT", dns.TXT),
+    99: ("SPF", dns.TXT)
+}
+
+
 class Record:
     def __init__(self, rname, rtype, args):
         self.rname = DNSLabel(rname)
-        rd_cls, self.rtype = TYPE_LOOKUP(rtype)
+        rd_cls, self.rtype = TYPE_LOOKUP[rtype]
 
         self.rr = RR(rname=self.rname, rtype=self.rtype, rdata=rd_cls(*args), ttl=0)
 
@@ -52,35 +73,48 @@ class Record:
 
 class Resolver(ProxyResolver):
     def __init__(self, mode):
-        super().__init__("8.8.8.8", 53, 5)
+        super().__init__("8.8.8.8", 53, timeout=timeout)
         self.mode = mode
 
 
     def resolve(self, request, handler):
         reply = request.reply()
+        logger.debug("New DNS request: %s type %s" % (request.q.qname, request.q.qtype))
         #reply.add_answer(RR(rname=DNSLabel("google.com"), rtype=QTYPE.A, rdata=dns.A("8.8.8.8")))
+        # If serving current zones
         for i in records:
             if i.match(request.q):
                 reply.add_answer(i.rr)
         if self.mode == "authoritative":
             return reply
         else:
+            # If alredy know this record
             for i in cache:
                 if i.match(request.q):
                     reply.add_answer(i.rr)
             if reply.rr:
                 return reply
+            # Making recursive request
             for i in zones:
                 if str(request.q.qname).endswith(i):
+                    logger.debug("DNS reqursive request to %s" % zones[i])
                     resp = dnsrequest(request.q.qname, request.q.qtype, zones[i])
-                    reply.add_answer(RR(rname=DNSLabel(request.q.qname), rtype=request.q.qtype, rdata=dns.A(str(resp))))
+                    if resp:
+                        record = Record(request.q.qname, QTYPE_LOOKUP[request.q.qtype][0], [resp])
+                        cache.append(record)
+                        reply.add_answer(record.rr)
                     return reply
             else:
                 if "default" in zones:
-                    resp = dnsrequest(request.q.qname, request.q.qtype, zones["default"])
-                    reply.add_answer(RR(rname=DNSLabel(request.q.qname), rtype=request.q.qtype, rdata=dns.A(str(resp))))
+                    logger.debug("DNS reqursive request to default server %s" % zones["default"])
+                    resp = dnsrequest(str(request.q.qname), request.q.qtype, zones["default"])
+                    if resp:
+                        record = Record(request.q.qname, QTYPE_LOOKUP[request.q.qtype][0], [resp])
+                        cache.append(record)
+                        reply.add_answer(record.rr)
                     return reply
                 else:
+                    logger.warning("All default servers unavaluable")
                     return super().resolve(request, handler)
 
 
@@ -119,9 +153,9 @@ def setlogging(path_to_log, log_level):
 def initdb(path_to_db):
     conn = sqlite3.connect(path_to_db)
     cursor = conn.cursor()
-    cursor.execute('''CREATE TABLE IF NOT EXISTS zones(id INT PRIMARY KEY, name TEXT, server TEXT);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS cache(id INT PRIMARY KEY, name TEXT, type TEXT, args TEXT);''')
-    cursor.execute('''CREATE TABLE IF NOT EXISTS servezones(id INT PRIMARY KEY, name TEXT, type TEXT, args TEXT);''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS zones(id INTEGER PRIMARY KEY, name TEXT, server TEXT);''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS cache(id INTEGER PRIMARY KEY, name TEXT, type TEXT, args TEXT);''')
+    cursor.execute('''CREATE TABLE IF NOT EXISTS servezones(id INTEGER PRIMARY KEY, name TEXT, type TEXT, args TEXT);''')
     conn.commit()
     cursor.execute('''SELECT name, server FROM zones;''')
     result = cursor.fetchall()
@@ -139,31 +173,114 @@ def initdb(path_to_db):
         i = list(i)
         if not i[0].endswith("."):
             i[0] += "."
-        records.append(Record(i[0], i[1], i[2]))
+        records.append(Record(i[0], i[1], [i[2]]))
     cursor.execute('''SELECT name, type, args FROM cache;''')
     result = cursor.fetchall()
     for i in result:
         i = list(i)
         if not i[0].endswith("."):
             i[0] += "."
-        cache.append(Record(i[0], i[1], i[2]))
+        cache.append(Record(i[0], i[1], [i[2]]))
     conn.close()
 
 
 def dnsrequest(rname, rtype, server):
     if "https" in server or "doh" in server:
-        client = requests.session()
-        params = {"name": rname, "type": rtype, 'ct': 'application/dns-json'}
         try:
-            resp = client.get("https://" + server.split("://")[1], params=params, timeout=timeout)
-            if resp.status_code == 200:
+            params={"name": rname, "type": rtype}
+            headers={"accept": "application/dns-json"}
+            resp = requests.get("https://" + server.split("://")[1], params=params, headers=headers, timeout=timeout)
+            if resp.status_code == 200 and resp.json()["Status"] == 0:
                 return resp.json()["Answer"][0]["data"]
             else:
                 logger.warning("Failed to execute DOH request (%s): %s" % (resp.status_code, resp.content))
         except Exception as e:
             logger.warning("Failed to execute DOH request: " + str(e))
     else:
-        pass
+        resp = request_classic(str(rname), server, rtype, timeout=timeout)
+        if resp[0] == 0:
+            return resp[1][0][3]
+        else:
+            logger.warning("Failed to execute classic DNS request: " + resp)
+
+
+def request_classic(name, server, qtype=1, port=53, timeout=1):  # A 1, NS 2, CNAME 5, SOA 6, NULL 10, PTR 12, MX 15, TXT 16, AAAA 28, NAPTR 35, * 255
+    addr=(server, port)
+    name = name.rstrip('.')
+    queryid = secrets.token_bytes(2)
+    # Header. 1 for Recursion Desired, 1 question, 0 answers, 0 ns, 0 additional
+    request = queryid + b'\1\0\0\1\0\0\0\0\0\0'
+    # Question
+    for label in name.rstrip('.').split('.'):
+        assert len(label) < 64, name
+        request += int.to_bytes(len(label), length=1, byteorder='big')
+        request += label.encode()
+    request += b'\0'  # terminates with the zero length octet for the null label of the root.
+    request += int.to_bytes(qtype, length=2, byteorder='big')  # QTYPE
+    request += b'\0\1'  # QCLASS = 1
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as s:
+        s.sendto(request, addr)
+        s.settimeout(timeout)
+        try:
+            response, serveraddr = s.recvfrom(4096)
+        except socket.timeout:
+            raise TimeoutError(name, timeout)
+    assert serveraddr == addr, (serveraddr, addr)
+    assert response[:2] == queryid, (response[:2], queryid)
+    assert response[2] & 128  # QR = Response
+    assert not response[2] & 4  # No Truncation
+    assert response[3] & 128  # Recursion Available
+    error_code = response[3] % 16  # 0 = no error, 1 = format error, 2 = server failure, 3 = does not exist, 4 = not implemented, 5 = refused
+    qdcount = int.from_bytes(response[4:6], 'big')
+    ancount = int.from_bytes(response[6:8], 'big')
+    assert qdcount <= 1
+    # parse questions
+    qa = response[12:]
+    for question in range(qdcount):
+        domain, qa = parse_qname(qa, response)
+        qtype, qa = parse_int(qa, 2)
+        qclass, qa = parse_int(qa, 2)
+    # parse answers
+    answers = []
+    for answer in range(ancount):
+        domain, qa = parse_qname(qa, response)
+        qtype, qa = parse_int(qa, 2)
+        qclass, qa = parse_int(qa, 2)
+        ttl, qa = parse_int(qa, 4)
+        rdlength, qa = parse_int(qa, 2)
+        rdata, qa = qa[:rdlength], qa[rdlength:]
+        if qtype == 1:  # IPv4 address
+            rdata = '.'.join(str(x) for x in rdata)
+        if qtype == 15:  # MX
+            mx_pref, rdata = parse_int(rdata, 2)
+        if qtype in (2, 5, 12, 15):  # NS, CNAME, MX
+            rdata, _ = parse_qname(rdata, response)
+        answer = (qtype, domain, ttl, rdata, mx_pref if qtype == 15 else None)
+        answers.append(answer)
+    return error_code, answers
+
+
+def parse_int(byts, ln):
+    return int.from_bytes(byts[:ln], 'big'), byts[ln:]
+
+
+def parse_qname(byts, full_response):
+    domain_parts = []
+    while True:
+        if byts[0] // 64:  # OFFSET pointer
+            assert byts[0] // 64 == 3, byts[0]
+            offset, byts = parse_int(byts, 2)
+            offset = offset - (128 + 64) * 256  # clear out top 2 bits
+            label, _ = parse_qname(full_response[offset:], full_response)
+            domain_parts.append(label)
+            break
+        else:  # regular QNAME
+            ln, byts = parse_int(byts, 1)
+            label, byts = byts[:ln], byts[ln:]
+            if not label:
+                break
+            domain_parts.append(label.decode())
+    return '.'.join(domain_parts), byts
 
 
 if __name__ == "__main__":

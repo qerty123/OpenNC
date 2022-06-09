@@ -135,6 +135,8 @@ setup.sh
 cert.crt
 key.key
 opennc-core.conf
+opennc-dns/opennc-dns.db
+opennc-dns/opennc-dns.sqlite
 
 
 
